@@ -69,7 +69,7 @@ Grant the Automation Account's Managed Identity the following roles:
 
 ---
 
-## 🛠️ How to Restore a Backup
+## How to Restore a Backup
 If a client accidentally deletes a DNS record:
 1. Navigate to your Storage Account -> Containers -> `dns-backups`.
 2. Open the specific client's folder and click on the domain's `.txt` file.
