@@ -4,6 +4,9 @@ A highly scalable, multi-tenant, and virtually serverless solution to automatica
 
 Designed specifically for Managed Service Providers (MSPs), this tool handles multiple Cloudflare accounts, dynamically discovers all domains within those accounts, and retains a version-controlled history of DNS records without requiring a single virtual machine.
 
+<img width="3197" height="1991" alt="Cloudflare Automated Backup Tool - Diagram" src="https://github.com/user-attachments/assets/40924e77-9e32-4ab0-9a8f-597da3a835ec" />
+
+
 ## Main Bits after being setup
 * **100% Serverless:** No VMs, no patching, no Hybrid Workers.
 * **Zero-Trust Networking:** Resources remain completely locked down behind Azure Firewalls. The script dynamically whitelists its own worker IP, performs the backup, and closes the firewall behind itself.
@@ -44,6 +47,9 @@ In your Storage Account, go to **Storage Browser** -> **Tables** and create a ta
 * **RowKey:** `Customer Name` (e.g., `Contoso` - recommend you match to the Cloudflare Account Name)
 * **AccountId:** `The Cloudflare Account ID String`
 
+<img width="1165" height="445" alt="image" src="https://github.com/user-attachments/assets/f1b6b8e9-324f-4a8c-8e5f-d956aeddbf0e" />
+
+
 ### Step 4: Deploy the Automation Account (Different Region!)
 1. Create an **Azure Automation Account** in a **DIFFERENT REGION** than your storage resources.
 2. Under **Identity**, enable the **System assigned managed identity**.
@@ -53,9 +59,13 @@ In your Storage Account, go to **Storage Browser** -> **Tables** and create a ta
 Grant the Automation Account's Managed Identity the following roles:
 * **Key Vault Contributor** (For Updating the Networking)
 * **Key Vault Secrets User** (For Reading the Secret)
+<img width="1439" height="883" alt="image" src="https://github.com/user-attachments/assets/d3b8cf8a-10a9-41a0-9db4-d0f634bddd4d" />
+
 * **Storage Account Contributor** (For Updating the Networking)
 * **Storage Table Data Reader** (For Reading the Client List)
 * **Storage Blob Data Contributor** (For Updating the Backup Storage)
+<img width="1286" height="704" alt="image" src="https://github.com/user-attachments/assets/2f5ddc98-e771-4001-bd39-df00da2fec16" />
+
 
 ### Step 6: Lock Down the Firewalls
 1. Go to your **Key Vault** -> **Networking**. Set it to **Allow access from specific virtual networks and IP addresses**. Add your physical office IP (so you can still manage it) and hit Save.
@@ -66,6 +76,9 @@ Grant the Automation Account's Managed Identity the following roles:
 2. Paste the provided `Backup-CloudflareDNS.ps1` script (see the script section or repository files).
 3. Update the Environment Variables block at the top of the script to match your resource names.
 4. Publish and attach a Schedule (e.g., 2:00 AM) - _Note: Massive amounts of zones will take time... make sure your schedule won't overlap if you've got thousands of domains..._
+5. Once the script is run, you should see your Blob Storage update with the customer and zones
+<img width="1144" height="526" alt="image" src="https://github.com/user-attachments/assets/af83d2ab-0373-4e38-981c-f64c6a569338" />
+
 
 ---
 
