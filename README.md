@@ -8,11 +8,11 @@ Designed specifically for Managed Service Providers (MSPs), this tool handles mu
 
 
 ## Main Bits after being setup
-* **100% Serverless:** No VMs, no patching, no Hybrid Workers.
-* **Zero-Trust Networking:** Resources remain completely locked down behind Azure Firewalls. The script dynamically whitelists its own worker IP, performs the backup, and closes the firewall behind itself.
-* **Native Versioning:** Leverages Azure Blob Versioning to keep an immutable, point-in-time history of all DNS changes.
+* **Serverless:** No VMs, no patching, no Hybrid Workers.
+* **Networking:** Resources remain completely locked down behind Azure Firewalls. The script dynamically whitelists its own worker IP, performs the backup, and closes the firewall behind itself.
+* **Native Versioning:** Leverages Azure Blob Versioning to keep a point-in-time history of all DNS changes.
 * **Multi-Tenant:** Uses Azure Table Storage as a lightweight database to manage hundreds of clients easily.
-* **Auto-Discovery:** Just provide a client's Cloudflare Account ID, and the script automatically finds and backs up every domain inside it.
+* **Auto-Discovery:** Just provide the Client's Name and Cloudflare Account ID to Azure Tables, and the script automatically finds and backs up every domain inside it.
 
 ---
 
@@ -53,7 +53,7 @@ In your Storage Account, go to **Storage Browser** -> **Tables** and create a ta
 ### Step 4: Deploy the Automation Account (Different Region!)
 1. Create an **Azure Automation Account** in a **DIFFERENT REGION** than your storage resources.
 2. Under **Identity**, enable the **System assigned managed identity**.
-3. Under **Shared Resources** -> **Modules**, ensure the `Az.Accounts`, `Az.KeyVault`, `AzTables` and `Az.Storage` modules are installed and updated (PowerShell 7.2 recommended) - AzTables most likely need manually import from gallery.
+3. Under **Shared Resources** -> **Modules**, ensure the `Az.Accounts`, `Az.KeyVault`, `AzTables` and `Az.Storage` modules are installed and updated (PowerShell 7.2) - AzTables most likely need to be manually imported from gallery.
 
 ### Step 5: Assign Permissions
 Grant the Automation Account's Managed Identity the following roles:
@@ -100,6 +100,24 @@ Azure serverless cloud workers have a hard execution limit of **180 minutes (3 h
 To maximize efficiency, the domain discovery API call uses the `per_page=500` parameter (`https://api.cloudflare.com/...&per_page=500`). 
 * **The Limit:** This instantly captures the entire portfolio of 99% of clients in a single API call. However, if you onboard a massive enterprise client with **501+ domains in a single Cloudflare account**, the script will only process the first 500. 
 * **The Fix:** For massive single-tenant accounts, you will need to add a `while` loop to the domain discovery block to check `result_info.total_pages` and paginate through `&page=2`, `&page=3`, etc.
+
+---
+
+## Pricing Summary
+
+This solution was designed to be as lightweight as possible, and as cost effective as possible. A summary of breakdown is below:
+
+1 File Version of Domain is roughly 2-5KiB
+
+So keeping 120 versions of 500 domains is about 1GB; Azure Pricing Calculator starts at 1GB, which is about £2.58pm with GRS (Cool Tier).
+
+Azure Key vault will only cost a few pence a month, as it's just hosting a single key
+
+Azure Automation is FREE :D well... for 500 Minutes per Month... then it's £0.002/minute afterwards
+
+Not included on the steps above, but you can also add Azure Backups to this if you want another layer of protection, which is about £1.09 of GRS of 30 Days Kept.
+
+_(Prices are estimates based on rough maths from Azure Calculator and Live Data I can see from my version of this - UK Based in GBP)_
 
 ---
 
