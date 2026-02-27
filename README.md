@@ -1,11 +1,10 @@
 # Serverless Cloudflare DNS Backup for MSPs (Azure Edition)
 
-A highly scalable, multi-tenant, and virtually serverless solution to automatically back up Cloudflare DNS records to Azure Blob Storage. 
+A highly scalable, multi-tenant, and virtually serverless solution to automatically back up Cloudflare DNS records to Azure Blob Storage, with a front end website.
 
 Designed specifically for Managed Service Providers (MSPs), this tool handles multiple Cloudflare accounts, dynamically discovers all domains within those accounts, and retains a version-controlled history of DNS records without requiring a single virtual machine.
 
-<img width="3197" height="1991" alt="Cloudflare Automated Backup Tool - Diagram" src="https://github.com/user-attachments/assets/40924e77-9e32-4ab0-9a8f-597da3a835ec" />
-
+<img width="3954" height="2648" alt="Cloudflare Automated Backup Tool - Diagram with engineer access website" src="https://github.com/user-attachments/assets/446b328b-1c59-4973-84df-1b0f335e86a0" />
 
 ## Main Bits after being setup
 * **Serverless:** No VMs, no patching, no Hybrid Workers.
@@ -13,6 +12,9 @@ Designed specifically for Managed Service Providers (MSPs), this tool handles mu
 * **Native Versioning:** Leverages Azure Blob Versioning to keep a point-in-time history of all DNS changes.
 * **Multi-Tenant:** Uses Azure Table Storage as a lightweight database to manage hundreds of clients easily.
 * **Auto-Discovery:** Just provide the Client's Name and Cloudflare Account ID to Azure Tables, and the script automatically finds and backs up every domain inside it.
+* **Custom Front End:** For easier engineering onboarding, a frontend protected in Cloudflare and hosted in Cloudflare Workers.
+<img width="664" height="759" alt="image" src="https://github.com/user-attachments/assets/943e4bd9-1972-4356-9366-503780286454" />
+
 
 ---
 
@@ -27,58 +29,7 @@ If they are in the same region, Azure routes the traffic over its internal backb
 
 ## Deployment Guide
 
-### Step 1: Prepare the Cloudflare API Token
-You need a single Cloudflare API Token scoped to the accounts you wish to back up.
-
-**Required Permissions:**
-* `Zone` -> `Zone` -> `Read` 
-* `Zone` -> `DNS` -> `Read`
-
-### Step 2: Deploy Azure Storage & Key Vault
-1. Create a **Storage Account** (Standard V2). 
-   * Go to **Data protection** and check **Enable versioning for blobs**.
-   * Create a private container named `dns-backups`.
-2. Create a **Key Vault** in the *same region* as the Storage Account.
-   * Add your Cloudflare API token as a Secret (e.g., `CLOUDFLARE-API-KEY`).
-
-### Step 3: Configure the Client Table
-In your Storage Account, go to **Storage Browser** -> **Tables** and create a table named `ProtectedCustomers`. Add a row for each client:
-* **PartitionKey:** `Cloudflare` (Static grouping label)
-* **RowKey:** `Customer Name` (e.g., `Contoso` - recommend you match to the Cloudflare Account Name)
-* **AccountId:** `The Cloudflare Account ID String`
-
-<img width="1165" height="445" alt="image" src="https://github.com/user-attachments/assets/f1b6b8e9-324f-4a8c-8e5f-d956aeddbf0e" />
-
-
-### Step 4: Deploy the Automation Account (Different Region!)
-1. Create an **Azure Automation Account** in a **DIFFERENT REGION** than your storage resources.
-2. Under **Identity**, enable the **System assigned managed identity**.
-3. Under **Shared Resources** -> **Modules**, ensure the `Az.Accounts`, `Az.KeyVault`, `AzTables` and `Az.Storage` modules are installed and updated (PowerShell 7.2) - AzTables most likely need to be manually imported from gallery.
-
-### Step 5: Assign Permissions
-Grant the Automation Account's Managed Identity the following roles:
-* **Key Vault Contributor** (For Updating the Networking)
-* **Key Vault Secrets User** (For Reading the Secret)
-<img width="1439" height="883" alt="image" src="https://github.com/user-attachments/assets/d3b8cf8a-10a9-41a0-9db4-d0f634bddd4d" />
-
-* **Storage Account Contributor** (For Updating the Networking)
-* **Storage Table Data Reader** (For Reading the Client List)
-* **Storage Blob Data Contributor** (For Updating the Backup Storage)
-<img width="1286" height="704" alt="image" src="https://github.com/user-attachments/assets/2f5ddc98-e771-4001-bd39-df00da2fec16" />
-
-
-### Step 6: Lock Down the Firewalls
-1. Go to your **Key Vault** -> **Networking**. Set it to **Allow access from specific virtual networks and IP addresses**. Add your physical office IP (so you can still manage it) and hit Save.
-2. Go to your **Storage Account** -> **Networking**. Set it to **Enabled from selected virtual networks and IP addresses**. Add your physical office IP and hit Save.
-
-### Step 7: Create the Runbook
-1. Create a PowerShell Runbook in your Automation Account.
-2. Paste the provided `Backup-CloudflareDNS.ps1` script (see the script section or repository files).
-3. Update the Environment Variables block at the top of the script to match your resource names.
-4. Publish and attach a Schedule (e.g., 2:00 AM) - _Note: Massive amounts of zones will take time... make sure your schedule won't overlap if you've got thousands of domains..._
-5. Once the script is run, you should see your Blob Storage update with the customer and zones
-<img width="1144" height="526" alt="image" src="https://github.com/user-attachments/assets/af83d2ab-0373-4e38-981c-f64c6a569338" />
-
+Review the Wiki Section of this Repo for complete guides for each section of this design.
 
 ---
 
