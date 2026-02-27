@@ -1,0 +1,20 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "cloudflare-backup-onboard-tool",
+	"main": "src/index.js",
+	"compatibility_date": "2026-02-27",
+	"observability": {
+		"enabled": true
+	},
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+  "routes": [
+    {
+      "pattern": "protect-cloudflare.yourmsp.co.uk",
+      "custom_domain": true
+    }
+  ]
+
+
+}
