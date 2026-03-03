@@ -4,22 +4,24 @@ A highly scalable, multi-tenant, and virtually serverless solution to automatica
 
 Designed specifically for Managed Service Providers (MSPs), this tool handles multiple Cloudflare accounts, dynamically discovers all domains within those accounts, and retains a version-controlled history of DNS records without requiring a single virtual machine.
 
-<img width="3954" height="2648" alt="Cloudflare Automated Backup Tool - Diagram with engineer access website" src="https://github.com/user-attachments/assets/446b328b-1c59-4973-84df-1b0f335e86a0" />
+<img width="3981" height="2619" alt="Cloudflare Automated Backup Tool - Diagram V2" src="https://github.com/user-attachments/assets/c966b795-3b5a-4e3e-b397-ac4bd576bb71" />
+
 
 ## Main Bits after being setup
 * **Serverless:** No VMs, no patching, no Hybrid Workers.
-* **Networking:** Resources remain completely locked down behind Azure Firewalls. The script dynamically whitelists its own worker IP, performs the backup, and closes the firewall behind itself.
-* **Native Versioning:** Leverages Azure Blob Versioning to keep a point-in-time history of all DNS changes.
+* **Networking:** Resources remain completely locked down behind Azure Firewalls.
+* **Terraform:** Pre-built Terraform Files to help support deploying this into an existing or new pipeline. Or just save time deploying it.
+* **Versioning:** Leverages Azure Blob Versioning to keep a point-in-time history of all DNS changes.
 * **Multi-Tenant:** Uses Azure Table Storage as a lightweight database to manage hundreds of clients easily.
-* **Auto-Discovery:** Just provide the Client's Name and Cloudflare Account ID to Azure Tables, and the script automatically finds and backs up every domain inside it.
 * **Custom Front End:** For easier engineering onboarding, a frontend protected in Cloudflare and hosted in Cloudflare Workers.
+
 <img width="664" height="759" alt="image" src="https://github.com/user-attachments/assets/943e4bd9-1972-4356-9366-503780286454" />
 
 
 ---
 
-## The "Cross-Region" Architecture (Crucial)
-To maintain a strict Zero-Trust firewall posture without paying for expensive Virtual Networks (VNets) or NAT Gateways, this solution uses a dynamic IP whitelisting script. 
+## "Cross-Region" Architecture (Crucial)
+To maintain a strict Zero-Trust firewall posture without needing Virtual Networks (VNets), NAT Gateways etc, this solution uses a dynamic IP whitelisting script based on the Automation Account's Public IP - avoiding Microsoft's Backbone Within-Region routing. 
 
 **CRITICAL REQUIREMENT:** Your **Azure Automation Account** must be deployed in a **different Azure Region** than your Storage Account and Key Vault (e.g., Automation in `UK South`, Storage in `UK West`). 
 
