@@ -1,21 +1,26 @@
 <#
 Written by Harry Shelton - 2026
 Script Name: Backup-CloudflareDNS.ps1
-Version: 2.0
-Description: Refreshed for V2, for use with the Frontend design of Cloudflare Worker for easier engineering onboarding. Includes better security design of requesting split storage for customer list and actual backup data.
+Version: 2.1.0
+V2.1.0 Update: Integrated DNS Drift Detection with aggregated HTML Email alerting (via a Logic App) for the Service Desk.
 #>
 
 Connect-AzAccount -Identity
 
 # --- Environment Variables - Update These ---
-$VaultName                = "UPDATE ME WITH VAULT NAME"
+$VaultName                = "Update Me with Your Key Vault Name"
 $GlobalSecretName         = "CLOUDFLARE-API-KEY"
-$BackupStorageAccountName = "UPDATE ME WITH STORAGE ACCOUNT FOR BACKING UP DATA"
-$TableStorageAccountName  = "UPDATE ME WITH STORAGE ACCOUNT FOR CUSTOMER LIST"
+$EmailSecretName          = "EMAIL-WEBHOOK-URL"
+$BackupStorageAccountName = "Update Me with Your Backup Storage Account Name"
+$TableStorageAccountName  = "Update me with your Customer List Storage Account Name"
 $TableName                = "ProtectedCustomers"
 $ContainerName            = "dns-backups"
-$ResourceGroupName        = "UPDATE ME WITH RESOURCE GROUP"
+$ResourceGroupName        = "Update Me with Your Resource Group Name"
 # ------------------------------
+# =========================================================================
+# =========================================================================
+
+#No requirement to update anything below me:
 
 #Get the dynamic IP of the Azure Automation Worker.
 Write-Output "Discovering local worker IP..."
@@ -34,7 +39,7 @@ try {
     Add-AzStorageAccountNetworkRule -ResourceGroupName $ResourceGroupName -Name $BackupStorageAccountName -IPAddressOrRange $WorkerIP -ErrorAction Stop
 
     #Query the Config Table
-    Write-Output "Querying Azure Table '$TableName' from Config Storage..."
+    Write-Output "Querying Azure Table '$TableName' from Customer List Storage..."
     $StorageToken = (Get-AzAccessToken -ResourceUrl "https://storage.azure.com/").Token
     $TableApiUrl = "https://$TableStorageAccountName.table.core.windows.net/$TableName`()"
     $TableHeaders = @{
@@ -51,7 +56,7 @@ try {
         exit
     }
 
-    #Smart Retry Loop (Wait for the locked-down firewalls to open)
+    #Retry Loop
     Write-Output "Waiting for Key Vault and Backup Storage firewalls to propagate..."
     $StorageContext = New-AzStorageContext -StorageAccountName $BackupStorageAccountName -UseConnectedAccount
     
@@ -67,8 +72,9 @@ try {
         try {
             Write-Output "Attempt $Attempt to verify firewalls..."
             
-            #Can we read the Key Vault?
+            #Can we read the Key Vault Secrets?
             $TokenSecret = Get-AzKeyVaultSecret -VaultName $VaultName -Name $GlobalSecretName -AsPlainText -ErrorAction Stop
+            $EmailWebhookUrl = Get-AzKeyVaultSecret -VaultName $VaultName -Name $EmailSecretName -AsPlainText -ErrorAction Stop
             
             #Can we read the Backup Blob Container?
             Get-AzStorageContainer -Context $StorageContext -Name $ContainerName -ErrorAction Stop | Out-Null
@@ -97,19 +103,20 @@ try {
     }
 
     # =========================================================================
-    # CLOUDFLARE BACKUP SECTION
+    # CLOUDFLARE BACKUP SECTION WITH DRIFT DETECTION & ALERTING - LOOPS PER CUSTOMER FOR ALERT EMAILS
     # =========================================================================
     
     # Loop through each customer account
     foreach ($Client in $ClientConfigurations) {
         $CustomerName = $Client.RowKey
         $AccountId    = $Client.AccountId
+        $ClientAlerts = @() #Reset the alert array
 
         Write-Output "================================================="
         Write-Output "Discovering zones for $CustomerName (Account: $AccountId)..."
 
         try {
-            # Fetch all zones under this Account ID (Allows up to 500 domains per client)
+            #Fetch all zones under this Account ID (Allows up to 500 domains per client)
             $ZonesUrl = "https://api.cloudflare.com/client/v4/zones?account.id=$AccountId&per_page=500"
             $ZonesResponse = Invoke-RestMethod -Uri $ZonesUrl -Method Get -Headers $Headers -ErrorAction Stop
             
@@ -121,7 +128,7 @@ try {
 
             Write-Output "Found $ZoneCount domains for $CustomerName."
 
-            # Loop through every discovered domain in the account
+            #Loop through every discovered domain in the account
             foreach ($Zone in $ZonesResponse.result) {
                 $ZoneId = $Zone.id
                 $DomainName = $Zone.name
@@ -129,26 +136,91 @@ try {
                 Write-Output "  -> Exporting DNS for $DomainName..."
                 
                 $ExportUrl = "https://api.cloudflare.com/client/v4/zones/$ZoneId/dns_records/export"
-                $TempFile = "$env:TEMP\$CustomerName-$DomainName-dns.txt"
+                $TempFileNew = "$env:TEMP\$CustomerName-$DomainName-new.txt"
+                $TempFileOld = "$env:TEMP\$CustomerName-$DomainName-old.txt"
                 
-                # Download the BIND file
-                Invoke-RestMethod -Uri $ExportUrl -Method Get -Headers $Headers -OutFile $TempFile -ErrorAction Stop
+                #Download the NEW backup from Cloudflare
+                Invoke-RestMethod -Uri $ExportUrl -Method Get -Headers $Headers -OutFile $TempFileNew -ErrorAction Stop
 
-                # Upload to Blob Storage into the Customer's folder
+                #Attempt to download the OLD backup from Azure (if it exists)
+                $BlobExists = $true
+                try {
+                    Get-AzStorageBlobContent -Context $StorageContext -Container $ContainerName -Blob "$CustomerName/$DomainName-dns.txt" -Destination $TempFileOld -Force -ErrorAction Stop | Out-Null
+                } catch {
+                    $BlobExists = $false
+                    Write-Output "  -> No previous backup found. First time backing up this domain."
+                }
+
+                #Perform the Drift Analysis (If an old backup exists)
+                if ($BlobExists) {
+                    #Read files, stripping out comments (;), empty lines, AND dynamically changing SOA records - otherwise it will detect drift every time :D
+                    $OldRecords = Get-Content $TempFileOld | Where-Object { $_ -notmatch '^\s*;' -and $_ -notmatch '\s+IN\s+SOA\s+' -and $_.Trim() -ne '' }
+                    $NewRecords = Get-Content $TempFileNew | Where-Object { $_ -notmatch '^\s*;' -and $_ -notmatch '\s+IN\s+SOA\s+' -and $_.Trim() -ne '' }
+
+                    #Compare the two updated arrays
+                    $Diff = Compare-Object -ReferenceObject $OldRecords -DifferenceObject $NewRecords
+
+                    if ($Diff) {
+                        Write-Output "  -> DRIFT DETECTED for $DomainName!"
+                        $DriftDetails = "<strong>$DomainName</strong><ul>"
+                        
+                        #Output the exact differences to the console/log and build HTML payload
+                        foreach ($Change in $Diff) {
+                            if ($Change.SideIndicator -eq "=>") {
+                                Write-Output "     [+] ADDED: $($Change.InputObject)"
+                                $DriftDetails += "<li><span style='color:green;'>[+] ADDED:</span> $($Change.InputObject)</li>"
+                            } else {
+                                Write-Output "     [-] REMOVED: $($Change.InputObject)"
+                                $DriftDetails += "<li><span style='color:red;'>[-] REMOVED:</span> $($Change.InputObject)</li>"
+                            }
+                        }
+                        $DriftDetails += "</ul>"
+                        $ClientAlerts += $DriftDetails
+                    } else {
+                        Write-Output "  -> No DNS drift detected. Configuration matches last backup."
+                    }
+                }
+
+                #Upload the NEW file to Blob Storage - this is the backup bit - even if drift is detected, we want to update the backup to the latest state for next time. Won't delete old version.
+                Write-Output "  -> Committing new backup to Azure Blob Storage..."
                 Set-AzStorageBlobContent -Context $StorageContext `
                     -Container $ContainerName `
-                    -File $TempFile `
+                    -File $TempFileNew `
                     -Blob "$CustomerName/$DomainName-dns.txt" `
                     -Force | Out-Null
                 
-                # Clean up the local temp file
-                Remove-Item -Path $TempFile -ErrorAction SilentlyContinue
+                #Clean up local temp files
+                Remove-Item -Path $TempFileNew, $TempFileOld -ErrorAction SilentlyContinue
             }
             
             Write-Output "Successfully backed up all domains for $CustomerName."
         }
         catch {
-            Write-Error "Failed processing account $CustomerName. Error: $_"
+            $ErrorMessage = $_.Exception.Message
+            Write-Error "Failed processing account $CustomerName. Error: $ErrorMessage"
+            $ClientAlerts += "<p><strong>Critical Error:</strong> Failed to process Cloudflare account. Details: $ErrorMessage</p>"
+        }
+
+        # =========================================================================
+        # TRIGGER EMAIL IF ALERTS MADE ABOVE
+        # =========================================================================
+        if ($ClientAlerts.Count -gt 0) {
+            Write-Output "Triggering Service Desk ticket for $CustomerName..."
+            
+            $EmailPayload = @{
+                CustomerName = $CustomerName
+                Subject      = "Cloudflare DNS Alert: Action Required for $CustomerName"
+                HtmlBody     = "<h3>DNS Changes or Errors Detected</h3>" + ($ClientAlerts -join "<br>")
+            } | ConvertTo-Json -Depth 10
+
+            try {
+                Invoke-RestMethod -Uri $EmailWebhookUrl -Method Post -ContentType "application/json" -Body $EmailPayload -ErrorAction Stop
+                Write-Output "Ticket generated successfully."
+            } catch {
+                Write-Error "Failed to trigger email webhook for $CustomerName : $($_)"
+            }
+        } else {
+            Write-Output "Zero drift or errors. No ticket required for $CustomerName."
         }
     }
 
@@ -161,7 +233,7 @@ catch {
 }
 finally {
     # =========================================================================
-    # Final Catch - Update the Firewalls Again
+    # CLEAN UP FIREWALLS AFTER SCRIPT - (Will run even if the above scripts fail for whatever reason) 
     # =========================================================================
     Write-Output "Securing environment: Removing worker IP from firewalls..."
     
