@@ -1,27 +1,28 @@
 # Serverless Cloudflare DNS Backup for MSPs (Azure Edition)
 
-A highly scalable, multi-tenant, and virtually serverless solution to automatically back up Cloudflare DNS records to Azure Blob Storage, with a front end website.
+_Latest Version: 2.1.0_
 
-Designed specifically for Managed Service Providers (MSPs), this tool handles multiple Cloudflare accounts, dynamically discovers all domains within those accounts, and retains a version-controlled history of DNS records without requiring a single virtual machine.
+A highly scalable, multi-tenant, and virtually serverless solution to automatically back up Cloudflare DNS records to Azure Blob Storage and check for drift, then send an alert if there was a change.
 
-<img width="3981" height="2619" alt="Cloudflare Automated Backup Tool - Diagram V2" src="https://github.com/user-attachments/assets/c966b795-3b5a-4e3e-b397-ac4bd576bb71" />
+This tool handles multiple Cloudflare accounts and zones, dynamically discovers all domains within those accounts, and retains a version-controlled history of DNS records without requiring a single virtual machine. Then sends you an alert if drift is detected.
 
+<img width="3954" height="2648" alt="Cloudflare Automated Backup Tool - Diagram" src="https://images.harryshelton.com/Cloudflare%20Automated%20Backup%20Tool%20-%20Diagram.png" />
 
-## Main Bits after being setup
-* **Serverless:** No VMs, no patching, no Hybrid Workers.
-* **Networking:** Resources remain completely locked down behind Azure Firewalls.
-* **Terraform:** Pre-built Terraform Files to help support deploying this into an existing or new pipeline. Or just save time deploying it.
-* **Versioning:** Leverages Azure Blob Versioning to keep a point-in-time history of all DNS changes.
-* **Multi-Tenant:** Uses Azure Table Storage as a lightweight database to manage hundreds of clients easily.
-* **Custom Front End:** For easier engineering onboarding, a frontend protected in Cloudflare and hosted in Cloudflare Workers.
+## Features
+* **Serverless**
+* **Alerts for Drift and Errors**
+* **Secured Networking**
+* **Blob Versioning**
+* **Multi Cloudflare Tenant Support**
+* **Auto-Discovery**
+* **Front End for Engineers** 
 
 <img width="664" height="759" alt="image" src="https://github.com/user-attachments/assets/943e4bd9-1972-4356-9366-503780286454" />
 
-
 ---
 
-## "Cross-Region" Architecture (Crucial)
-To maintain a strict Zero-Trust firewall posture without needing Virtual Networks (VNets), NAT Gateways etc, this solution uses a dynamic IP whitelisting script based on the Automation Account's Public IP - avoiding Microsoft's Backbone Within-Region routing. 
+## Cross-Region Architecture (Crucial)
+To maintain a strict Zero-Trust firewall posture but not using Virtual Networks (VNets) or NAT Gateways, this solution uses a dynamic IP whitelisting script of the Automation Account.
 
 **CRITICAL REQUIREMENT:** Your **Azure Automation Account** must be deployed in a **different Azure Region** than your Storage Account and Key Vault (e.g., Automation in `UK South`, Storage in `UK West`). 
 
@@ -37,45 +38,52 @@ Review the Wiki Section of this Repo for complete guides for each section of thi
 
 ## API Limits & Scaling Considerations
 
-This solution is designed to scale natively for Managed Service Providers, but like any cloud architecture, it operates within the boundaries of Microsoft and Cloudflare. If you are managing thousands of domains, keep the following in mind:
+This solution is designed to scale natively for MSPs. However, like any cloud architecture, it operates within the boundaries of the underlying platforms (Microsoft Azure and Cloudflare). 
 
-### 1. Cloudflare Rate Limits (1,200 requests / 5 mins)
-Cloudflare enforces a strict global rate limit. Because this script runs synchronously (downloading and uploading one domain at a time), it takes roughly 1.5 to 2.5 seconds per domain. 
-* **The Result:** The script acts as its own natural throttle. It will only process about 150–200 domains every 5 minutes, keeping you comfortably below Cloudflare's 1,200 request threshold. No `429 Too Many Requests` handling is typically required.
+If you are managing hundreds or thousands of domains, you must factor in the following constraints and scaling strategies:
 
-### 2. Azure Automation "Fair Share" Limit (3 Hours)
-Azure serverless cloud workers have a hard execution limit of **180 minutes (3 hours)**. If a script runs longer than this, Azure will force-kill the job.
-* **The Math:** At ~2 seconds per domain, a single runbook can safely process up to **~5,000 domains** per night. 
-* **The Fix:** If your MSP grows beyond 5,000 managed domains, simply duplicate the Runbook and split the schedule. (e.g., Have Runbook A process Partition 1 at 1:00 AM, and Runbook B process Partition 2 at 3:00 AM).
-* Or.... migrate the script to a Hybrid Runbook Worker, Virtual Machine or a Function App.
+### Platform Constraints & Mitigation Strategies
 
-### 3. Cloudflare Pagination (500 Domains per Account)
-To maximize efficiency, the domain discovery API call uses the `per_page=500` parameter (`https://api.cloudflare.com/...&per_page=500`). 
-* **The Limit:** This instantly captures the entire portfolio of 99% of clients in a single API call. However, if you onboard a massive enterprise client with **501+ domains in a single Cloudflare account**, the script will only process the first 500. 
-* **The Fix:** For massive single-tenant accounts, you will need to add a `while` loop to the domain discovery block to check `result_info.total_pages` and paginate through `&page=2`, `&page=3`, etc.
+| Platform & Constraint | Hard Limit | The Operational Impact | Architectural Fix / Mitigation |
+| :--- | :--- | :--- | :--- |
+| **Cloudflare** <br> Global Rate Limit | **1,200 req** <br> per 5 mins | Because this script runs synchronously (processing one domain at a time), it takes roughly 1.5 to 2.5 seconds per domain. It acts as its own natural throttle, processing only ~150–200 domains every 5 minutes. | **None Required:** The synchronous nature of PowerShell keeps you comfortably below the 1,200 request threshold. No `429 Too Many Requests` handling is typically needed. |
+| **Azure Automation** <br> "Fair Share" Limit | **3 Hours** <br> (180 mins) | Azure serverless cloud workers have a hard execution limit of 3 hours. If a script runs longer than this, Azure will force-kill the job and flag it as "Suspended." | **Horizontal Scaling:** At ~5 seconds per domain (including drift detection), a single runbook can safely process **~2,100 domains**. If you grow beyond this, duplicate the runbook to split the schedule (e.g., Runbook A at 1:00 AM, Runbook B at 3:00 AM), or migrate the compute engine to an Azure Hybrid Worker. |
+
 
 ---
 
-## Pricing Summary
+## FinOps
 
-This solution was designed to be as lightweight as possible, and as cost effective as possible. A summary of breakdown is below:
+This solution was purpose-built with a serverless, consumption-based architecture. The monthly compute and storage overhead is virtually zero or less than a price of coffee in London a month for most MSPs.
 
-1 File Version of Domain is roughly 2-5KiB
+### Estimated Monthly Breakdown
 
-So keeping 120 versions of 500 domains is about 1GB; Azure Pricing Calculator starts at 1GB, which is about £2.58pm with GRS (Cool Tier).
+| Azure Service | Estimated Cost (GBP) | Billing Mechanics & Free Tiers |
+| :--- | :--- | :--- |
+| **Azure Storage (Blob)** | ~£2.58 / mo | **Data Payload:** 1 version of a domain BIND file is ~2-5KiB. Retaining 120 days of history for 500 domains equates to ~300MB. Pricing is based on Azure's 1GB minimum using Geo-Redundant Storage (GRS). |
+| **Azure Storage (Table)** | < £0.05 / mo | **Config Database:** Table storage is billed at fractions of a penny per 10,000 transactions. |
+| **Azure Key Vault** | < £0.05 / mo | **Secrets:** Billed at ~£0.022 per 10,000 transactions. |
+| **Azure Automation** | **FREE** | **Compute:** The first 500 job minutes per month are completely free. Once exceeded, billing is just £0.002/minute. |
+| **Azure Logic App** | **FREE** | **Alerting Webhook/Email:** Consumption plan includes the first 4,000 built-in actions per month for free. Subsequent standard connector calls are ~£0.000093 each. |
+| **Azure Backup** *(Optional)* | ~£1.09 / mo | **Secondary Protection:** Adding an Azure Recovery Services vault for an isolated 30-day retention layer of the Storage Account. |
 
-Azure Key vault will only cost a few pence a month, as it's just hosting a single key
+### Recommended Data Lifecycle Configuration
 
-Azure Automation is FREE :D well... for 500 Minutes per Month... then it's £0.002/minute afterwards
 
-Not included on the steps above, but you can also add Azure Backups to this if you want another layer of protection, which is about £1.09 of GRS of 30 Days Kept.
 
-_(Prices are estimates based on rough maths from Azure Calculator and Live Data I can see from my version of this - UK Based in GBP)_
+To minimise transaction and storage costs while supporting the "Drift Alerting" feature, I highly recommend applying the following Lifecycle Management Rule to your `dns-backups` blob container for verisons:
+
+1. **Hot Tier (Days 1 - 3):** Keep recent backups in the Hot tier. This prevents early-deletion/retrieval penalties when the script downloads yesterday's file to perform the Drift Detection comparison.
+2. **Cool Tier (Days 4 - 30):** Automatically transition files to the Cool tier for cheaper at-rest storage.
+3. **Cold/Archive Tier (Days 31 - 60):** Move aging historical versions to Cold storage for deep archiving.
+4. **Delete (Day 60+):** Automatically permanently delete blob versions older than 60 days to prevent infinite data sprawl.
+
+> *Disclaimer: Prices are estimates based on the Azure Pricing Calculator (UK South/West region) and billing data from test deployments. Actual costs may vary slightly based on your specific domain count, file sizes, and regional pricing updates.*
 
 ---
 
 ## How to Restore a Backup
-If a client accidentally deletes a DNS record:
+If a client accidentally deletes or changes a DNS record:
 1. Navigate to your Storage Account -> Containers -> `dns-backups`.
 2. Open the specific client's folder and click on the domain's `.txt` file.
 3. Download the version from the day prior to the outage or requested time. You can re-import this BIND file directly into Cloudflare or open it in a text editor to find the missing record.

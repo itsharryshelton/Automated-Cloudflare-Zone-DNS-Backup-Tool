@@ -37,7 +37,7 @@ resource "azurerm_storage_account" "sa_b" {
   location                 = azurerm_resource_group.west.location
   account_tier             = "Standard"
   account_replication_type = "LRS"
-  access_tier              = "Cool"
+  access_tier              = "Hot"
 
   blob_properties {
     versioning_enabled = true
@@ -51,7 +51,7 @@ resource "azurerm_storage_account" "sa_b" {
   }
 }
 
-# Blob Container in DNS Backup Storage Account
+#Blob Container in DNS Backup Storage Account
 resource "azurerm_storage_container" "dns_backups" {
   name                  = "dns-backups"
   storage_account_id    = azurerm_storage_account.sa_b.id
@@ -73,6 +73,8 @@ resource "azurerm_storage_management_policy" "dns_backups_policy" {
     
     actions {
       version {
+        change_tier_to_cool_after_days_since_creation = 3
+        tier_to_cold_after_days_since_creation_greater_than = 30
         delete_after_days_since_creation = 60
       }
     }
