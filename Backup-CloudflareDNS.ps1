@@ -1,8 +1,9 @@
 <#
-Written by Harry Shelton - 2026
+Written by Harry Shelton
 Script Name: Backup-CloudflareDNS.ps1
 Version: 2.1.0
-V2.1.0 Update: Integrated DNS Drift Detection with aggregated HTML Email alerting (via a Logic App) for the Service Desk.
+Integrated DNS Drift Detection with aggregated HTML Email alerting (via a Logic App) for the Service Desk.
+Added Cloudflare API pagination handling to support enterprise tenants with 50+ domains.
 #>
 
 Connect-AzAccount -Identity
@@ -116,20 +117,43 @@ try {
         Write-Output "Discovering zones for $CustomerName (Account: $AccountId)..."
 
         try {
-            #Fetch all zones under this Account ID (Allows up to 500 domains per client)
-            $ZonesUrl = "https://api.cloudflare.com/client/v4/zones?account.id=$AccountId&per_page=500"
-            $ZonesResponse = Invoke-RestMethod -Uri $ZonesUrl -Method Get -Headers $Headers -ErrorAction Stop
-            
-            $ZoneCount = $ZonesResponse.result.Count
+            # ==================================================
+            # CLOUDFLARE PAGINATION LOGIC TO AVOID API LIMIT
+            # ==================================================
+            $AllZones = @()
+            $Page = 1
+            $TotalPages = 1
+
+            while ($Page -le $TotalPages) {
+                Write-Output "  -> Fetching domain list (Page $Page of $TotalPages)..."
+                
+                #Fetch up to 50 zones per page (Cloudflare's max limit for this endpoint)
+                $ZonesUrl = "https://api.cloudflare.com/client/v4/zones?account.id=$AccountId&per_page=50&page=$Page"
+                $ZonesResponse = Invoke-RestMethod -Uri $ZonesUrl -Method Get -Headers $Headers -ErrorAction Stop
+                
+                if ($ZonesResponse.result) {
+                    $AllZones += $ZonesResponse.result
+                }
+
+                #Update the total pages based on Cloudflare's result_info
+                if ($ZonesResponse.result_info.total_pages) {
+                    $TotalPages = $ZonesResponse.result_info.total_pages
+                }
+
+                $Page++
+            }
+            # ==================================================
+
+            $ZoneCount = $AllZones.Count
             if ($ZoneCount -eq 0) {
                 Write-Warning "No domains found in Cloudflare for $CustomerName. Skipping."
                 continue
             }
 
-            Write-Output "Found $ZoneCount domains for $CustomerName."
+            Write-Output "Found $ZoneCount total domains for $CustomerName."
 
             #Loop through every discovered domain in the account
-            foreach ($Zone in $ZonesResponse.result) {
+            foreach ($Zone in $AllZones) {
                 $ZoneId = $Zone.id
                 $DomainName = $Zone.name
                 
