@@ -73,6 +73,7 @@ Once all deployed, you will need to:
     * **PartitionKey:** `Cloudflare` (Static grouping label)
     * **RowKey:** `Customer Name` (e.g., `Contoso` - recommend you match to the Cloudflare Account Name)
     * **AccountId:** `The Cloudflare Account ID String`
+3. Put your Runbook Schedule in if you wanted automatic backups.
 
 ---
 ## Support
