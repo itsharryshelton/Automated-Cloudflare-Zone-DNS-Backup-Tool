@@ -67,17 +67,6 @@ This solution was purpose-built with a serverless, consumption-based architectur
 | **Azure Logic App** | **FREE** | **Alerting Webhook/Email:** Consumption plan includes the first 4,000 built-in actions per month for free. Subsequent standard connector calls are ~£0.000093 each. |
 | **Azure Backup** *(Optional)* | ~£1.09 / mo | **Secondary Protection:** Adding an Azure Recovery Services vault for an isolated 30-day retention layer of the Storage Account. |
 
-### Recommended Data Lifecycle Configuration
-
-
-
-To minimise transaction and storage costs while supporting the "Drift Alerting" feature, I highly recommend applying the following Lifecycle Management Rule to your `dns-backups` blob container for verisons:
-
-1. **Hot Tier (Days 1 - 3):** Keep recent backups in the Hot tier. This prevents early-deletion/retrieval penalties when the script downloads yesterday's file to perform the Drift Detection comparison.
-2. **Cool Tier (Days 4 - 30):** Automatically transition files to the Cool tier for cheaper at-rest storage.
-3. **Cold/Archive Tier (Days 31 - 60):** Move aging historical versions to Cold storage for deep archiving.
-4. **Delete (Day 60+):** Automatically permanently delete blob versions older than 60 days to prevent infinite data sprawl.
-
 > *Disclaimer: Prices are estimates based on the Azure Pricing Calculator (UK South/West region) and billing data from test deployments. Actual costs may vary slightly based on your specific domain count, file sizes, and regional pricing updates.*
 
 ---
