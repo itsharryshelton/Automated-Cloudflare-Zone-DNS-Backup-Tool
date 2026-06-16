@@ -47,7 +47,7 @@ resource "azurerm_storage_account" "sa_b" {
   network_rules {
     default_action = "Deny"
     ip_rules       = var.allowed_ips
-    bypass         = ["AzureServices"] 
+    bypass         = ["AzureServices"]
   }
 }
 
@@ -65,17 +65,17 @@ resource "azurerm_storage_management_policy" "dns_backups_policy" {
   rule {
     name    = "delete-versions-after-60-days"
     enabled = true
-    
+
     filters {
       blob_types   = ["blockBlob"]
       prefix_match = ["dns-backups/"]
     }
-    
+
     actions {
       version {
-        change_tier_to_cool_after_days_since_creation = 3
+        change_tier_to_cool_after_days_since_creation       = 3
         tier_to_cold_after_days_since_creation_greater_than = 30
-        delete_after_days_since_creation = 60
+        delete_after_days_since_creation                    = 60
       }
     }
   }
@@ -103,11 +103,14 @@ resource "azurerm_key_vault" "kv" {
   location                    = azurerm_resource_group.west.location
   resource_group_name         = azurerm_resource_group.west.name
   enabled_for_disk_encryption = true
-  tenant_id                   = data.azurerm_client_config.current.tenant_id
-  soft_delete_retention_days  = 7
-  purge_protection_enabled    = false
-  sku_name                    = "standard"
-  rbac_authorization_enabled   = true 
+  # Allows ARM template deployments (the Logic App) to resolve secret values via
+  # Key Vault references at deploy time, so secrets never pass through Terraform state.
+  enabled_for_template_deployment = true
+  tenant_id                       = data.azurerm_client_config.current.tenant_id
+  soft_delete_retention_days      = 7
+  purge_protection_enabled        = false
+  sku_name                        = "standard"
+  rbac_authorization_enabled      = true
 }
 
 # ==========================================
@@ -127,29 +130,24 @@ resource "azurerm_automation_account" "aa" {
   }
 }
 
-# PowerShell Module Import: Az.Accounts (Required dependency for AzTable, might not be enabled by default.)
+# PowerShell Module Import: Az.Accounts
+# Provides Connect-AzAccount, Get-AzAccessToken, Get-AzContext (and is the auth
+# dependency for Az.KeyVault / Az.Storage, which ship with the runtime's built-in Az set).
+#
+# IMPORTANT: the version is pinned. An unpinned ".../package/Az.Accounts" URI imports
+# whatever is "latest", which is a newer MAJOR (3.x/4.x/5.x) than the Az.KeyVault/Az.Storage
+# built into the PowerShell 7.2 runtime. The version mismatch breaks the module's assembly
+# load context ("Unable to find type [...AzAssemblyLoadContextInitializer]"), which makes
+# Connect-AzAccount fail to register and every downstream Az* cmdlet report
+# "context has not been properly initialized". 2.19.0 is the latest 2.x and stays
+# major-aligned with the built-in modules.
 resource "azurerm_automation_powershell72_module" "az_accounts" {
   name                  = "Az.Accounts"
   automation_account_id = azurerm_automation_account.aa.id
 
   module_link {
-    uri = "https://www.powershellgallery.com/api/v2/package/Az.Accounts"
+    uri = "https://www.powershellgallery.com/api/v2/package/Az.Accounts/${var.az_accounts_version}"
   }
-}
-
-# PowerShell Module Import: AzTable
-resource "azurerm_automation_powershell72_module" "az_table" {
-  name                  = "AzTable"
-  automation_account_id = azurerm_automation_account.aa.id
-
-  module_link {
-    uri = "https://www.powershellgallery.com/api/v2/package/AzTable"
-  }
-
-  # Ensures Az.Accounts finishes installing before AzTable begins
-  depends_on = [
-    azurerm_automation_powershell72_module.az_accounts
-  ]
 }
 
 # PowerShell 7.2 Runbook
@@ -209,4 +207,79 @@ resource "azurerm_role_assignment" "kv_admin_deployer" {
   scope                = azurerm_key_vault.kv.id
   role_definition_name = "Key Vault Administrator"
   principal_id         = data.azurerm_client_config.current.object_id
+}
+
+# ==========================================
+# LOGIC APP - DNS DRIFT ALERTING (UK WEST)
+# ==========================================
+# The runbook POSTs drift alerts to this Logic App's HTTP trigger. The workflow then
+# (a) emails a shared mailbox via the Office 365 connector and (b) forwards to the
+# Cloudflare drift webhook. The workflow body lives in logic-app.template.json; secrets
+# are pulled from Key Vault at deploy time via references (never stored in state).
+
+# Office 365 managed API in the West region
+data "azurerm_managed_api" "office365" {
+  name     = "office365"
+  location = azurerm_resource_group.west.location
+}
+
+# API connection used by the email action.
+# NOTE: Terraform can create this connection, but it cannot complete the OAuth consent.
+# After the first apply you MUST open this connection in the Azure portal and authorize it
+# with the shared-mailbox account, or the email action will fail at runtime.
+resource "azurerm_api_connection" "office365" {
+  name                = "office365"
+  resource_group_name = azurerm_resource_group.west.name
+  managed_api_id      = data.azurerm_managed_api.office365.id
+  display_name        = "office365"
+
+  lifecycle {
+    # The authorized connection's parameter_values are populated out-of-band (portal OAuth);
+    # don't let Terraform try to revert them on subsequent applies.
+    ignore_changes = [parameter_values]
+  }
+}
+
+# Deploy the Logic App workflow from the ARM template. Secret parameters are supplied as
+# Key Vault references, so ARM fetches them directly from the vault at deploy time and the
+# values are never written to Terraform state or plan output.
+resource "azurerm_resource_group_template_deployment" "logic_app" {
+  name                = "${var.logic_app_name}-deploy"
+  resource_group_name = azurerm_resource_group.west.name
+  deployment_mode     = "Incremental"
+  template_content    = file("${path.module}/logic-app.template.json")
+
+  parameters_content = jsonencode({
+    workflowName          = { value = var.logic_app_name }
+    location              = { value = azurerm_resource_group.west.location }
+    office365ConnectionId = { value = azurerm_api_connection.office365.id }
+    mailboxAddress        = { value = var.alert_mailbox_address }
+    toAddress             = { value = var.alert_to_address }
+    driftWebhookUri       = { value = var.drift_webhook_uri }
+
+    # Key Vault references - resolved by ARM at deploy time, not by Terraform.
+    driftSecret = {
+      reference = {
+        keyVault   = { id = azurerm_key_vault.kv.id }
+        secretName = var.drift_secret_name
+      }
+    }
+    cfAccessClientId = {
+      reference = {
+        keyVault   = { id = azurerm_key_vault.kv.id }
+        secretName = var.cf_access_client_id_secret_name
+      }
+    }
+    cfAccessClientSecret = {
+      reference = {
+        keyVault   = { id = azurerm_key_vault.kv.id }
+        secretName = var.cf_access_client_secret_secret_name
+      }
+    }
+  })
+
+  depends_on = [
+    azurerm_api_connection.office365,
+    azurerm_role_assignment.kv_admin_deployer
+  ]
 }

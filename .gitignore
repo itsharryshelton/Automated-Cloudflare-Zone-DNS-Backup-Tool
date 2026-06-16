@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------------------
+# Terraform
+# ---------------------------------------------------------------------------
+# Local .terraform directories and downloaded provider binaries (large)
+**/.terraform/*
+
+# State files - may contain SENSITIVE values; never commit
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Variable files that hold environment-specific or secret values.
+# Keep an *.example template in the repo, but ignore the real ones.
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+
+# CLI config / plan output
+.terraformrc
+terraform.rc
+*.tfplan
+
+# ---------------------------------------------------------------------------
+# Node / Cloudflare Workers (wrangler)
+# ---------------------------------------------------------------------------
+node_modules/
+.wrangler/
+.dev.vars
+dist/
+
+# ---------------------------------------------------------------------------
+# Editor / OS noise
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,22 +1,31 @@
 <#
 Written by Harry Shelton
 Script Name: Backup-CloudflareDNS.ps1
-Version: 2.1.0
+Version: 2.2.0
 Integrated DNS Drift Detection with aggregated HTML Email alerting (via a Logic App) for the Service Desk.
 Added Cloudflare API pagination handling to support enterprise tenants with 50+ domains.
 #>
 
-Connect-AzAccount -Identity
+Import-Module Az.Accounts -ErrorAction Stop
+try {
+    Connect-AzAccount -Identity -ErrorAction Stop | Out-Null
+    $ctx = Get-AzContext
+    Write-Output "Connected to Azure. Account: $($ctx.Account.Id) | Subscription: $($ctx.Subscription.Name)"
+}
+catch {
+    throw "Managed Identity login failed: $($_.Exception.Message)"
+}
 
 # --- Environment Variables - Update These ---
-$VaultName                = "Update Me with Your Key Vault Name"
-$GlobalSecretName         = "CLOUDFLARE-API-KEY"
-$EmailSecretName          = "EMAIL-WEBHOOK-URL"
-$BackupStorageAccountName = "Update Me with Your Backup Storage Account Name"
-$TableStorageAccountName  = "Update me with your Customer List Storage Account Name"
-$TableName                = "ProtectedCustomers"
-$ContainerName            = "dns-backups"
-$ResourceGroupName        = "Update Me with Your Resource Group Name"
+$VaultName = "yourmsp-cf-kv-01"
+$GlobalSecretName = "CLOUDFLARE-API-KEY"
+$EmailSecretName = "EMAIL-WEBHOOK-URL"
+$BackupStorageAccountName = "yourmspdnsbackups"
+$TableStorageAccountName = "yourmspcustomerlist"
+$TableName = "ProtectedCustomers"
+$ContainerName = "dns-backups"
+# Resource group that holds the BACKUP storage account ($BackupStorageAccountName).
+$BackupResourceGroupName = "rg-cloudflarebackup-ukwest-01"
 # ------------------------------
 # =========================================================================
 # =========================================================================
@@ -37,7 +46,7 @@ try {
     Add-AzKeyVaultNetworkRule -VaultName $VaultName -IpAddressRange "$WorkerIP/32" -ErrorAction Stop
     
     Write-Output "Attempting to add IP to Backup Storage Account firewall..."
-    Add-AzStorageAccountNetworkRule -ResourceGroupName $ResourceGroupName -Name $BackupStorageAccountName -IPAddressOrRange $WorkerIP -ErrorAction Stop
+    Add-AzStorageAccountNetworkRule -ResourceGroupName $BackupResourceGroupName -Name $BackupStorageAccountName -IPAddressOrRange $WorkerIP -ErrorAction Stop
 
     #Query the Config Table
     Write-Output "Querying Azure Table '$TableName' from Customer List Storage..."
@@ -87,7 +96,8 @@ try {
             #If we get a 403 Forbidden or AuthorizationFailure, keep waiting.
             if ($_.Exception.Message -match "403" -or $_.Exception.Message -match "Forbidden" -or $_.Exception.Message -match "AuthorizationFailure") {
                 Write-Output "Firewalls still propagating. Retrying in $RetryWaitSeconds seconds..."
-            } else {
+            }
+            else {
                 throw "Unexpected error during firewall verification: $_"
             }
         }
@@ -110,7 +120,7 @@ try {
     # Loop through each customer account
     foreach ($Client in $ClientConfigurations) {
         $CustomerName = $Client.RowKey
-        $AccountId    = $Client.AccountId
+        $AccountId = $Client.AccountId
         $ClientAlerts = @() #Reset the alert array
 
         Write-Output "================================================="
@@ -170,7 +180,8 @@ try {
                 $BlobExists = $true
                 try {
                     Get-AzStorageBlobContent -Context $StorageContext -Container $ContainerName -Blob "$CustomerName/$DomainName-dns.txt" -Destination $TempFileOld -Force -ErrorAction Stop | Out-Null
-                } catch {
+                }
+                catch {
                     $BlobExists = $false
                     Write-Output "  -> No previous backup found. First time backing up this domain."
                 }
@@ -193,14 +204,16 @@ try {
                             if ($Change.SideIndicator -eq "=>") {
                                 Write-Output "     [+] ADDED: $($Change.InputObject)"
                                 $DriftDetails += "<li><span style='color:green;'>[+] ADDED:</span> $($Change.InputObject)</li>"
-                            } else {
+                            }
+                            else {
                                 Write-Output "     [-] REMOVED: $($Change.InputObject)"
                                 $DriftDetails += "<li><span style='color:red;'>[-] REMOVED:</span> $($Change.InputObject)</li>"
                             }
                         }
                         $DriftDetails += "</ul>"
                         $ClientAlerts += $DriftDetails
-                    } else {
+                    }
+                    else {
                         Write-Output "  -> No DNS drift detected. Configuration matches last backup."
                     }
                 }
@@ -240,10 +253,12 @@ try {
             try {
                 Invoke-RestMethod -Uri $EmailWebhookUrl -Method Post -ContentType "application/json" -Body $EmailPayload -ErrorAction Stop
                 Write-Output "Ticket generated successfully."
-            } catch {
+            }
+            catch {
                 Write-Error "Failed to trigger email webhook for $CustomerName : $($_)"
             }
-        } else {
+        }
+        else {
             Write-Output "Zero drift or errors. No ticket required for $CustomerName."
         }
     }
@@ -262,7 +277,7 @@ finally {
     Write-Output "Securing environment: Removing worker IP from firewalls..."
     
     Remove-AzKeyVaultNetworkRule -VaultName $VaultName -IpAddressRange "$WorkerIP/32" -ErrorAction Continue | Out-Null
-    Remove-AzStorageAccountNetworkRule -ResourceGroupName $ResourceGroupName -Name $BackupStorageAccountName -IPAddressOrRange $WorkerIP -ErrorAction Continue | Out-Null
+    Remove-AzStorageAccountNetworkRule -ResourceGroupName $BackupResourceGroupName -Name $BackupStorageAccountName -IPAddressOrRange $WorkerIP -ErrorAction Continue | Out-Null
     
     Write-Output "Environment secured."
 }

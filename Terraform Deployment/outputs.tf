@@ -36,3 +36,14 @@ output "automation_account_principal_id" {
   description = "The Principal ID of the Automation Account's Managed Identity"
   value       = azurerm_automation_account.aa.identity[0].principal_id
 }
+
+# LOGIC APP OUTPUTS
+output "logic_app_name" {
+  description = "The name of the DNS drift alerting Logic App (UK West)."
+  value       = var.logic_app_name
+}
+
+output "office365_connection_id" {
+  description = "Resource ID of the Office 365 API connection. After deploy, open this in the portal and authorize it with the shared mailbox before the email action will work."
+  value       = azurerm_api_connection.office365.id
+}

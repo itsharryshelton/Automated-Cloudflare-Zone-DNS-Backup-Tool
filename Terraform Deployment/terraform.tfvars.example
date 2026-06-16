@@ -1,0 +1,43 @@
+# ---------------------------------------------------------------------------
+# Example variable values. Copy to terraform.tfvars and edit.
+#   cp terraform.tfvars.example terraform.tfvars
+# terraform.tfvars is gitignored so your real values are never committed.
+# ---------------------------------------------------------------------------
+
+# --- Regions (Automation MUST be in a different region to Storage/Key Vault) ---
+location_west  = "ukwest"
+location_south = "uksouth"
+
+rg_west_name  = "rg-cloudflarebackup-ukwest-01"
+rg_south_name = "rg-cloudflarebackup-uksouth-01"
+
+# --- Globally unique resource names (lowercase alphanumeric; KV allows hyphens) ---
+storage_account_customerlist_name = "yourmspcustomerlist"
+storage_account_dnsbackup_name    = "yourmspdnsbackups"
+key_vault_name                    = "yourmsp-cf-kv-01"
+
+automation_account_name = "aa-cloudflare-uks-01"
+
+# --- Storage firewall allow-list: YOUR real public egress IPs / CIDRs ---
+# Set out of range on purpose to fail terraform deployment to ensure you update these before using the Terraform code.
+allowed_ips = [
+  "703.0.713.0/29",
+  "798.51.700.70",
+]
+
+# --- Alerting (Logic App) ---
+logic_app_name        = "la-cloudflare-drift-alerts-ukw-01"
+alert_mailbox_address = "[EMAIL_ADDRESS]"
+alert_to_address      = "[EMAIL_ADDRESS]"
+
+# Optional external drift webhook. Leave as-is if you remove the
+# Cloudflare_D1_Drift action from logic-app.template.json.
+drift_webhook_uri = "https://your-drift-endpoint.example.com/drift/api/webhook"
+
+# --- PowerShell module version (pin a 2.x build; see variables.tf for why) ---
+az_accounts_version = "2.19.0"
+
+# Key Vault secret NAMES (the VALUES are created directly in Key Vault, never here).
+drift_secret_name                   = "DRIFT-SECRET"
+cf_access_client_id_secret_name     = "CF-ACCESS-CLIENT-ID"
+cf_access_client_secret_secret_name = "CF-ACCESS-CLIENT-SECRET"

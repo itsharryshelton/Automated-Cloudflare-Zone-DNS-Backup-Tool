@@ -1,0 +1,149 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "metadata": {
+        "_comment": "Deploys the Cloudflare DNS drift alerting Logic App (Consumption) in UK West. Secrets are passed as secureString parameters (sourced from Key Vault by Terraform) and are never stored in this file."
+    },
+    "parameters": {
+        "workflowName": {
+            "type": "string"
+        },
+        "location": {
+            "type": "string"
+        },
+        "office365ConnectionId": {
+            "type": "string",
+            "metadata": {
+                "description": "Resource ID of the office365 API connection (created by Terraform). Must be authorized via OAuth in the portal after deployment."
+            }
+        },
+        "mailboxAddress": {
+            "type": "string",
+            "metadata": {
+                "description": "Shared mailbox the alert is sent from."
+            }
+        },
+        "toAddress": {
+            "type": "string",
+            "metadata": {
+                "description": "Recipient of the drift alert email."
+            }
+        },
+        "driftWebhookUri": {
+            "type": "string",
+            "metadata": {
+                "description": "Cloudflare drift webhook endpoint."
+            }
+        },
+        "driftSecret": {
+            "type": "securestring"
+        },
+        "cfAccessClientId": {
+            "type": "securestring"
+        },
+        "cfAccessClientSecret": {
+            "type": "securestring"
+        }
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2019-05-01",
+            "name": "[parameters('workflowName')]",
+            "location": "[parameters('location')]",
+            "properties": {
+                "state": "Enabled",
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "triggers": {
+                        "When_an_HTTP_request_is_received": {
+                            "type": "Request",
+                            "kind": "Http",
+                            "inputs": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "CustomerName": {
+                                            "type": "string"
+                                        },
+                                        "Subject": {
+                                            "type": "string"
+                                        },
+                                        "HtmlBody": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "actions": {
+                        "Send_an_email_from_a_shared_mailbox_(V2)": {
+                            "runAfter": {},
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['office365']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "body": {
+                                    "MailboxAddress": "[parameters('mailboxAddress')]",
+                                    "To": "[parameters('toAddress')]",
+                                    "Subject": "@triggerBody()?['Subject']",
+                                    "Body": "<p class=\"editor-paragraph\"><b><strong class=\"editor-text-bold\">Alert:</strong></b> Backup Drift Detected<br><b><strong class=\"editor-text-bold\">Service:</strong></b> Cloudflare DNS to Azure Backup<br><b><strong class=\"editor-text-bold\">Cloudflare Type: </strong></b>Managed Cloudflare Partnership</p><br><p class=\"editor-paragraph\">The following customer experienced a drift during their most recent Cloudflare DNS to Azure backup. Please review the details below to determine if the changes are expected or require remediation.</p><br><p class=\"editor-paragraph\"><b><strong class=\"editor-text-bold\">Details:</strong></b></p><p class=\"editor-paragraph\">@{triggerBody()?['CustomerName']}</p><p class=\"editor-paragraph\">@{triggerBody()?['HtmlBody']}</p>",
+                                    "Importance": "High"
+                                },
+                                "path": "/v2/SharedMailbox/Mail"
+                            }
+                        },
+                        "Cloudflare_D1_Drift": {
+                            "runAfter": {},
+                            "type": "Http",
+                            "inputs": {
+                                "uri": "[parameters('driftWebhookUri')]",
+                                "method": "POST",
+                                "headers": {
+                                    "x-drift-secret": "[parameters('driftSecret')]",
+                                    "CF-Access-Client-Id": "[parameters('cfAccessClientId')]",
+                                    "CF-Access-Client-Secret": "[parameters('cfAccessClientSecret')]",
+                                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                                },
+                                "body": {
+                                    "customerName": "@{triggerBody()?['CustomerName']}",
+                                    "htmlBody": "@{triggerBody()?['HtmlBody']}"
+                                }
+                            },
+                            "runtimeConfiguration": {
+                                "contentTransfer": {
+                                    "transferMode": "Chunked"
+                                }
+                            }
+                        }
+                    },
+                    "outputs": {},
+                    "parameters": {
+                        "$connections": {
+                            "type": "Object",
+                            "defaultValue": {}
+                        }
+                    }
+                },
+                "parameters": {
+                    "$connections": {
+                        "value": {
+                            "office365": {
+                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'office365')]",
+                                "connectionId": "[parameters('office365ConnectionId')]",
+                                "connectionName": "office365"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    ],
+    "outputs": {}
+}
