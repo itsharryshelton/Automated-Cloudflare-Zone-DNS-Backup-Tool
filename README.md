@@ -17,7 +17,9 @@ This tool handles multiple Cloudflare accounts and zones, dynamically discovers 
 * **Auto-Discovery**
 * **Front End for Engineers** 
 
-<img width="664" height="759" alt="image" src="https://github.com/user-attachments/assets/943e4bd9-1972-4356-9366-503780286454" />
+> [!IMPORTANT]
+> **Worker Code** The Worker code on this Repo is an older basic version, we recommend you migrate to the full Partner Portal; the Backup links with it fully: https://github.com/itsharryshelton/A.R.G.U.S-Cloudflare-Partner-Portal-for-MSPs/tree/main
+> Only use this Worker code if you only ever plan to use Backups and need a quick way to add them.
 
 ---
 
