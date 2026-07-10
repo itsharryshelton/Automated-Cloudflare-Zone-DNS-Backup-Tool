@@ -50,7 +50,11 @@ try {
 
     #Query the Config Table
     Write-Output "Querying Azure Table '$TableName' from Customer List Storage..."
-    $StorageToken = (Get-AzAccessToken -ResourceUrl "https://storage.azure.com/").Token
+    # Az.Accounts 5.0.0+ (Az 14.0.0+) returns the token as a SecureString by default.
+    # -AsSecureString + ConvertFrom-SecureString -AsPlainText works on both old and new Az.
+    $StorageToken = Get-AzAccessToken -ResourceUrl "https://storage.azure.com/" -AsSecureString |
+        Select-Object -ExpandProperty Token |
+        ConvertFrom-SecureString -AsPlainText
     $TableApiUrl = "https://$TableStorageAccountName.table.core.windows.net/$TableName`()"
     $TableHeaders = @{
         "Authorization" = "Bearer $StorageToken"

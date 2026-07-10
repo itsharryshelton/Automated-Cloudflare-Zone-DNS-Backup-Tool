@@ -7,7 +7,7 @@ This Terraform configuration deploys a secure and scalable infrastructure on Azu
 - Resource Groups in UK West and UK South
 - Two Storage Accounts (one for DNS backups with Cool tier and one for Customer List with Hot tier)
 - An Azure Key Vault for secure credential storage
-- An Azure Automation Account with a PowerShell 7.2 runbook for backup operations
+- An Azure Automation Account with a PowerShell 7.6 runbook (Runtime Environment) for backup operations
 - RBAC role assignments to ensure least privilege access for the Automation Account's Managed Identity
 
 */
@@ -130,39 +130,44 @@ resource "azurerm_automation_account" "aa" {
   }
 }
 
-# PowerShell Module Import: Az.Accounts
-# Provides Connect-AzAccount, Get-AzAccessToken, Get-AzContext (and is the auth
-# dependency for Az.KeyVault / Az.Storage, which ship with the runtime's built-in Az set).
+# PowerShell 7.6 Runtime Environment
+# Replaces the old PowerShell72 runtime-version model AND the separate Az.Accounts module
+# import. A Runtime Environment pins the WHOLE Az meta-package in one place, so Az.Accounts /
+# Az.KeyVault / Az.Storage always load from the same major version - the assembly-load-context
+# mismatch that forced the old 2.19.0 pin ("Unable to find type
+# [...AzAssemblyLoadContextInitializer]") can no longer happen.
 #
-# IMPORTANT: the version is pinned. An unpinned ".../package/Az.Accounts" URI imports
-# whatever is "latest", which is a newer MAJOR (3.x/4.x/5.x) than the Az.KeyVault/Az.Storage
-# built into the PowerShell 7.2 runtime. The version mismatch breaks the module's assembly
-# load context ("Unable to find type [...AzAssemblyLoadContextInitializer]"), which makes
-# Connect-AzAccount fail to register and every downstream Az* cmdlet report
-# "context has not been properly initialized". 2.19.0 is the latest 2.x and stays
-# major-aligned with the built-in modules.
-resource "azurerm_automation_powershell72_module" "az_accounts" {
-  name                  = "Az.Accounts"
+# Requires azurerm >= 4.59.0 (runtime_environment_name on the runbook). Repo pins ~> 4.62.0.
+resource "azurerm_automation_runtime_environment" "ps76" {
+  name                  = "cf-backup-ps76"
+  location              = azurerm_resource_group.south.location
   automation_account_id = azurerm_automation_account.aa.id
-
-  module_link {
-    uri = "https://www.powershellgallery.com/api/v2/package/Az.Accounts/${var.az_accounts_version}"
+  runtime_language      = "PowerShell"
+  runtime_version       = "7.6"
+  description           = "PS 7.6 runtime for the Cloudflare DNS backup runbook"
+  runtime_default_packages = {
+    "Az" = var.az_version
   }
 }
 
-# PowerShell 7.2 Runbook
-resource "azurerm_automation_runbook" "ps72_runbook" {
-  name                    = "Backup-CloudflareDNS"
-  location                = azurerm_resource_group.south.location
-  resource_group_name     = azurerm_resource_group.south.name
-  automation_account_name = azurerm_automation_account.aa.name
-  log_verbose             = true
-  log_progress            = true
-  description             = "PS 7.2 runbook pulled from a local file"
-  runbook_type            = "PowerShell72"
+# PowerShell 7.6 Runbook
+resource "azurerm_automation_runbook" "cf_backup" {
+  name                     = "Backup-CloudflareDNS"
+  location                 = azurerm_resource_group.south.location
+  resource_group_name      = azurerm_resource_group.south.name
+  automation_account_name  = azurerm_automation_account.aa.name
+  log_verbose              = true
+  log_progress             = true
+  description              = "Cloudflare DNS backup runbook (PS 7.6 runtime environment)"
+  runbook_type             = "PowerShell"
+  runtime_environment_name = azurerm_automation_runtime_environment.ps76.name
 
   # Reads the script directly from a local .ps1 file - ensure script exists within the SAME folder as this main.tf and is named "Backup-CloudflareDNS.ps1"
   content = file("${path.module}/Backup-CloudflareDNS.ps1")
+}
+moved {
+  from = azurerm_automation_runbook.ps72_runbook
+  to   = azurerm_automation_runbook.cf_backup
 }
 
 # ==========================================

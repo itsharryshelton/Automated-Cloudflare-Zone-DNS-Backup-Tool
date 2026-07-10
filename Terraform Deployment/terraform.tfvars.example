@@ -34,8 +34,8 @@ alert_to_address      = "[EMAIL_ADDRESS]"
 # Cloudflare_D1_Drift action from logic-app.template.json.
 drift_webhook_uri = "https://your-drift-endpoint.example.com/drift/api/webhook"
 
-# --- PowerShell module version (pin a 2.x build; see variables.tf for why) ---
-az_accounts_version = "2.19.0"
+# --- Az package version pinned in the PS 7.6 Runtime Environment (Az 14.0.0+; see variables.tf) ---
+az_version = "14.0.0"
 
 # Key Vault secret NAMES (the VALUES are created directly in Key Vault, never here).
 drift_secret_name                   = "DRIFT-SECRET"

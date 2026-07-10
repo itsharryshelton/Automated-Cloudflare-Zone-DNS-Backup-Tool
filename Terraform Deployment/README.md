@@ -16,8 +16,8 @@ This is a terraform deployment for this Cloudflare backup tool to speed up, it u
 **UK South (Automation Compute)**
 * **Resource Group:** Logical container for compute resources.
 * **Azure Automation Account:** Runs serverless scripts using a System-Assigned Managed Identity.
-* **PowerShell 7.2 Module:** Imports `Az.Accounts` (version-pinned via the `az_accounts_version` variable - see the comment in `main.tf` for why pinning matters). `Az.KeyVault` and `Az.Storage` come from the runtime's built-in Az module set.
-* **PowerShell 7.2 Runbook:** Executes the local `Backup-CloudflareDNS.ps1` script to process the backups, drift detection and alerting.
+* **PowerShell 7.6 Runtime Environment:** Pins the whole `Az` meta-package (via the `az_version` variable - Az 14.0.0+ / Az.Accounts 5.x) so `Az.Accounts`, `Az.KeyVault` and `Az.Storage` all load from the same major version. Replaces the older per-module import + version pin. Az 14.0.0+ is required because `Get-AzAccessToken` returns a `SecureString` from that version onward, which the script handles.
+* **PowerShell 7.6 Runbook:** Bound to the Runtime Environment above; executes the local `Backup-CloudflareDNS.ps1` script to process the backups, drift detection and alerting.
 
 **IAM / RBAC Security**
 The Automation Account's Managed Identity is strictly scoped with the following permissions:

@@ -1,7 +1,7 @@
 /*
 Written by Harry Shelton - 2026
 Cloudflare Automated Tool Deployment on Azure with Terraform
-Version: 1.1
+Version: 1.2
 
 */
 
@@ -54,10 +54,10 @@ variable "automation_account_name" {
   default     = "aa-cloudflare-uks-01"
 }
 
-variable "az_accounts_version" {
-  description = "Az.Accounts module version to import into the PowerShell 7.2 runtime. Pin to a 2.x build to stay major-version aligned with the Az.KeyVault/Az.Storage modules built into the runtime; newer majors break the assembly load context."
+variable "az_version" {
+  description = "Az meta-package version pinned in the PowerShell 7.6 Runtime Environment (runtime_default_packages). Use an Az 14.0.0+ release (Az.Accounts 5.x) - the family where Get-AzAccessToken returns a SecureString, which Backup-CloudflareDNS.ps1 handles. Pinning the whole Az package keeps Az.Accounts/KeyVault/Storage assembly-aligned. Verify the value against what the Automation Account offers under Runtime Environments."
   type        = string
-  default     = "2.19.0"
+  default     = "14.0.0"
 }
 
 # ----------------------------------------------------------------------------
